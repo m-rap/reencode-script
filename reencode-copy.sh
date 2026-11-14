@@ -16,16 +16,34 @@ i=0
 ISDEFAULTCODEC=0
 
 doEncode() {
-    fIn="$1"
-    fOut="$2"
-    echo "$fIn $fOut"
+    local fIn="$1"
+    local fOut="$2"
+    echo "$fIn -> $fOut"
+
+    # Only apply movflags for mp4/mov/m4v containers
+    local movflags=()
+    case "${fOut,,}" in
+        *.mp4|*.mov|*.m4v) movflags=(-movflags use_metadata_tags) ;;
+    esac
+
     if [ "$ISDEFAULTCODEC" = "1" ]; then
-	ffmpeg -i "$fIn" -threads 4 -map 0 -map_metadata 0 -map_metadata:s:v 0:s:v -map_metadata:s:a 0:s:a -movflags use_metadata_tags "$fOut"
+        ffmpeg -nostdin -i "$fIn" -threads 4 \
+            -map 0 -map_metadata 0 -map_metadata:s:v 0:s:v -map_metadata:s:a 0:s:a \
+            "${movflags[@]}" "$fOut" || return $?
     else
-        VCODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:keyonly=1 "$fIn") && \
-        ACODEC=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:keyonly=1 "$fIn") && \
-        FORMAT=$(ffprobe -v error -show_entries format=format_name -of default=noprint_wrappers=1:keyonly=1 "$fIn" | cut -d',' -f1) && \
-        ffmpeg -i "$fIn" -threads 4 -map 0 -c:v $VCODEC -c:a $ACODEC -f $FORMAT -map_metadata 0 -map_metadata:s:v 0:s:v -map_metadata:s:a 0:s:a -movflags use_metadata_tags "$fOut"
+        local VCODEC ACODEC
+        VCODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$fIn")
+        ACODEC=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$fIn")
+
+        local codec_args=()
+        [ -n "$VCODEC" ] && codec_args+=(-c:v "$VCODEC")
+        [ -n "$ACODEC" ] && codec_args+=(-c:a "$ACODEC")
+
+        # Let FFmpeg auto-detect container format from $fOut extension (assuming $fOut keeps the source extension)
+        ffmpeg -nostdin -i "$fIn" -threads 4 \
+            -map 0 "${codec_args[@]}" \
+            -map_metadata 0 -map_metadata:s:v 0:s:v -map_metadata:s:a 0:s:a \
+            "${movflags[@]}" "$fOut" || return $?
     fi
 }
 
